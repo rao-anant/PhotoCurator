@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/action_one_click_delete"
+        android:title="Enable One-Click Delete"
+        app:showAsAction="never" />
+    <item android:id="@+id/action_sort" android:title="Sort"
+        app:showAsAction="ifRoom|withText" />
+    <item android:id="@+id/action_refresh" android:title="Refresh"
+        android:icon="@android:drawable/ic_menu_rotate"
+        app:showAsAction="ifRoom" />
+</menu>

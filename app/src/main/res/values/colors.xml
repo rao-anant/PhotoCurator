@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#6750A4</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="surface">#1C1B1F</color>
+    <color name="on_surface">#E6E1E5</color>
+    <color name="on_surface_variant">#CAC4D0</color>
+    <color name="surface_variant">#49454F</color>
+    <color name="background">#141218</color>
+    <color name="photo_placeholder">#2B2930</color>
+    <color name="selection_bar">#2D2B32</color>
+    <color name="delete_red">#B3261E</color>
+
+    <!-- New Yellow Button Colors -->
+    <color name="hide_button_yellow">#FBC02D</color>
+    <color name="on_hide_button_yellow">#000000</color>
+</resources>
