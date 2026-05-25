@@ -6,6 +6,24 @@ enum class MediaType {
     IMAGE, VIDEO, PDF
 }
 
+enum class SortMode {
+    DATE_NEWEST, DATE_OLDEST, SIZE_ABSOLUTE, SIZE_WITHIN_MONTH, COUNT_PER_MONTH
+}
+
+data class MediaStats(
+    // Counts: visible = in non-hidden months (all types, ignores chip filter)
+    val visiblePhotos: Int, val hiddenPhotos: Int, val totalPhotos: Int,
+    val visibleVideos: Int, val hiddenVideos: Int, val totalVideos: Int,
+    val visiblePdfs:   Int, val hiddenPdfs:   Int, val totalPdfs:   Int,
+    // Sizes in bytes
+    val visiblePhotoBytes: Long, val hiddenPhotoBytes: Long,
+    val visibleVideoBytes: Long, val hiddenVideoBytes: Long,
+    val visiblePdfBytes:   Long, val hiddenPdfBytes:   Long,
+    // Integrity
+    val integrityOk: Boolean,
+    val integrityDetail: String
+)
+
 data class MediaItem(
     val id: Long,
     val uri: String,

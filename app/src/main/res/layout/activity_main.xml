@@ -44,22 +44,17 @@
                 android:text="Photos: --"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                android:textColor="@color/primary" />
+                android:textColor="@android:color/white" />
 
             <TextView
                 android:id="@+id/tvTotalVideos"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="20dp"
+                android:layout_marginStart="16dp"
                 android:text="Videos: --"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                android:textColor="@color/primary" />
-
-            <View
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+                android:textColor="@android:color/white" />
 
             <TextView
                 android:id="@+id/tvTotalPdfs"
@@ -68,8 +63,26 @@
                 android:text="PDFs: --"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                android:textColor="@color/on_surface_variant"
-                android:visibility="gone" />
+                android:textColor="@android:color/white"
+                android:visibility="gone"
+                android:layout_marginStart="16dp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/btnStatsInfo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ⓘ"
+                android:textSize="18sp"
+                android:textColor="@android:color/white"
+                android:paddingStart="8dp"
+                android:paddingEnd="4dp"
+                android:clickable="true"
+                android:focusable="true" />
         </LinearLayout>
 
         <!-- Settings Bar -->
@@ -81,16 +94,43 @@
             android:gravity="center_vertical"
             android:paddingStart="8dp"
             android:paddingEnd="8dp"
-            android:background="#F5F5F5"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:background="@color/surface"
             app:layout_scrollFlags="scroll|enterAlways">
 
-            <com.google.android.material.checkbox.MaterialCheckBox
-                android:id="@+id/cbIncludePdf"
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/filterChipGroup"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Include PDFs"
-                android:textSize="13sp"
-                android:textColor="@color/on_surface" />
+                app:singleSelection="false"
+                app:chipSpacingHorizontal="6dp">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipPhoto"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Photo"
+                    android:checked="true" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipVideo"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Video"
+                    android:checked="true" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipPdf"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="PDF"
+                    android:checked="true" />
+
+            </com.google.android.material.chip.ChipGroup>
         </LinearLayout>
 
         <LinearLayout
@@ -102,6 +142,16 @@
             android:visibility="gone"
             app:layout_scrollFlags="scroll|enterAlways">
 
+            <TextView
+                android:id="@+id/tvHiddenTotal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="12dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="2dp"
+                android:textSize="11sp"
+                android:textColor="@color/on_surface_variant" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -112,7 +162,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Restore:"
+                    android:text="Unhide:"
                     android:textStyle="bold"
                     android:layout_marginStart="4dp"
                     android:layout_marginEnd="8dp"
@@ -134,7 +184,8 @@
                         android:inputType="none"
                         android:textSize="14sp"
                         android:paddingTop="8dp"
-                        android:paddingBottom="8dp" />
+                        android:paddingBottom="8dp"
+                        android:dropDownWidth="260dp" />
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <com.google.android.material.textfield.TextInputLayout

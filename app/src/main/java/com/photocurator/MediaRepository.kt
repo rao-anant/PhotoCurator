@@ -150,9 +150,9 @@ class MediaRepository(private val context: Context) {
                         val da = cursor.getLong(daCol) * 1000
                         val dm = cursor.getLong(dmCol) * 1000
                         
-                        val bestDate = resolveBestDate(name, 0, dm, da)
+                        val bestDate = resolvePdfDate(name, da, dm)
                         val uri = ContentUris.withAppendedId(collectionUri, id).toString()
-                        
+
                         mediaList.add(MediaItem(id, uri, "external", bestDate, name, size, MediaType.PDF))
                     }
                 }
@@ -164,13 +164,17 @@ class MediaRepository(private val context: Context) {
 
     fun processAndGroupMedia(
         rawMedia: List<MediaItem>,
-        ascending: Boolean,
+        sortMode: SortMode,
         doneMonthKeys: Set<String>
     ): Pair<List<MonthGroup>, List<MonthGroup>> {
-        val sortedList = if (ascending) {
-            rawMedia.sortedWith(compareBy({ it.dateTaken }, { it.id }))
-        } else {
-            rawMedia.sortedWith(compareByDescending<MediaItem> { it.dateTaken }.thenByDescending { it.id })
+        // Sort items before grouping
+        val sortedList = when (sortMode) {
+            SortMode.DATE_OLDEST       -> rawMedia.sortedWith(compareBy({ it.dateTaken }, { it.id }))
+            SortMode.DATE_NEWEST       -> rawMedia.sortedWith(compareByDescending<MediaItem> { it.dateTaken }.thenByDescending { it.id })
+            SortMode.SIZE_ABSOLUTE     -> rawMedia.sortedWith(compareByDescending<MediaItem> { it.size }.thenByDescending { it.dateTaken })
+            SortMode.SIZE_WITHIN_MONTH -> rawMedia.sortedWith(compareByDescending<MediaItem> { it.size }.thenByDescending { it.dateTaken })
+            // Items within each month are shown newest-first; months are re-ordered after grouping.
+            SortMode.COUNT_PER_MONTH   -> rawMedia.sortedWith(compareByDescending<MediaItem> { it.dateTaken }.thenByDescending { it.id })
         }
 
         val visibleGroups = mutableListOf<MonthGroup>()
@@ -183,7 +187,7 @@ class MediaRepository(private val context: Context) {
             val year = calendar.get(Calendar.YEAR)
             val month = calendar.get(Calendar.MONTH) + 1
             val key = prefs.monthKey(year, month)
-            
+
             var group = groupMap[key]
             if (group == null) {
                 val label = labelFormat.format(calendar.time)
@@ -193,25 +197,122 @@ class MediaRepository(private val context: Context) {
             }
             group.items.add(item)
         }
+
+        // Post-grouping month-level re-sorts:
+        // SIZE_ABSOLUTE     — month order already follows the largest file encountered; no re-sort.
+        // SIZE_WITHIN_MONTH — items are size-sorted; restore newest-month-first chronological order.
+        // COUNT_PER_MONTH   — sort months so the one with the most items appears first.
+        when (sortMode) {
+            SortMode.SIZE_WITHIN_MONTH -> visibleGroups.sortByDescending { g -> g.year * 100 + g.month }
+            SortMode.COUNT_PER_MONTH   -> visibleGroups.sortByDescending { it.items.size }
+            else -> { /* order already correct */ }
+        }
+
         return Pair(visibleGroups, doneGroups)
     }
 
     private fun resolveBestDate(name: String, dt: Long, dm: Long, da: Long): Long {
+        val now = System.currentTimeMillis()
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+
+        // A timestamp is only "reasonable" if it's in the past and from a plausible year (1980–now).
+        fun isReasonable(ts: Long): Boolean {
+            if (ts <= 1_000_000L || ts > now) return false
+            val year = Calendar.getInstance().also { it.timeInMillis = ts }.get(Calendar.YEAR)
+            return year in 1980..currentYear
+        }
+
+        // 1. Prefer exact YYYY-MM-DD extracted from filename (already has year range guard).
         val filenameDate = extractDateFromFilename(name)
-        if (filenameDate > 1000000) return filenameDate
+        if (filenameDate > 1_000_000L) return filenameDate
+
+        // 2. Year-only hint from filename, but only for plausible past years.
         val yearMatch = yearOnlyRegex.find(name)
         if (yearMatch != null && dt <= 0) {
             try {
                 val year = yearMatch.value.toInt()
-                val cal = Calendar.getInstance()
-                cal.set(year, 0, 1, 12, 0)
-                return cal.timeInMillis
+                if (year in 1980..currentYear) {
+                    val cal = Calendar.getInstance()
+                    cal.set(year, 0, 1, 12, 0, 0)
+                    cal.set(Calendar.MILLISECOND, 0)
+                    return cal.timeInMillis
+                }
             } catch (e: Exception) {}
         }
-        if (dt > 1000000) return dt
-        if (da > 1000000) return da
-        if (dm > 1000000) return dm
-        return System.currentTimeMillis()
+
+        // 3. Use metadata timestamps — but only if they are reasonable (no future/garbage dates).
+        if (isReasonable(dt)) return dt
+        if (isReasonable(da)) return da
+        if (isReasonable(dm)) return dm
+
+        // 4. All metadata is garbage or in the future — clamp to now so the file
+        //    doesn't pollute far-future month headers like "January 2099".
+        val best = when {
+            dt > 1_000_000L -> dt
+            da > 1_000_000L -> da
+            dm > 1_000_000L -> dm
+            else -> now
+        }
+        return best.coerceAtMost(now)
+    }
+
+    /**
+     * Date resolver specifically for PDFs.
+     *
+     * PDFs have no EXIF. Their DATE_MODIFIED in MediaStore is the file-system modification
+     * time, which is often copied verbatim from the PDF's internal creation/modification
+     * metadata — meaning a PDF of a 1987 paper downloaded yesterday will show DATE_MODIFIED
+     * of January 1987. DATE_ADDED (when MediaStore indexed the file) is therefore the most
+     * trustworthy anchor for "when did this PDF arrive on the device."
+     *
+     * Strategy (in priority order):
+     *   1. Exact date embedded in the filename (e.g. report_2024-03-15.pdf)
+     *   2. Year hint in the filename, if plausible (1993–now; PDF format was born in 1993)
+     *   3. DATE_ADDED — when MediaStore first saw the file (reliable for downloads)
+     *   4. DATE_MODIFIED — accepted only if it's ≥ year 2000 (pre-2000 values almost always
+     *      reflect embedded document metadata, not when the file arrived on the phone)
+     *   5. Fallback: current time, so the file lands in "this month" rather than creating
+     *      phantom headers like "January 1987"
+     */
+    private fun resolvePdfDate(name: String, dateAdded: Long, dateModified: Long): Long {
+        val now = System.currentTimeMillis()
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+
+        fun yearOf(ts: Long): Int =
+            Calendar.getInstance().also { it.timeInMillis = ts }.get(Calendar.YEAR)
+
+        fun isUsable(ts: Long, minYear: Int): Boolean {
+            if (ts <= 1_000_000L || ts > now) return false
+            return yearOf(ts) in minYear..currentYear
+        }
+
+        // 1. Exact date from filename
+        val filenameDate = extractDateFromFilename(name)
+        if (filenameDate > 1_000_000L) return filenameDate
+
+        // 2. Year-only hint from filename (PDF era: 1993 onward)
+        val yearMatch = yearOnlyRegex.find(name)
+        if (yearMatch != null) {
+            try {
+                val year = yearMatch.value.toInt()
+                if (year in 1993..currentYear) {
+                    val cal = Calendar.getInstance()
+                    cal.set(year, 0, 1, 12, 0, 0)
+                    cal.set(Calendar.MILLISECOND, 0)
+                    return cal.timeInMillis
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 3. DATE_ADDED — best proxy for "arrived on device"; accept back to 1993
+        if (isUsable(dateAdded, 1993)) return dateAdded
+
+        // 4. DATE_MODIFIED — only trust it from year 2000 onward; older values almost
+        //    always come from the PDF's own embedded metadata, not the download date
+        if (isUsable(dateModified, 2000)) return dateModified
+
+        // 5. Cannot determine a reliable date → use now
+        return now
     }
 
     private fun extractDateFromFilename(name: String): Long {
@@ -221,7 +322,8 @@ class MediaRepository(private val context: Context) {
                 val year = match.groupValues[1].toInt()
                 val month = match.groupValues[2].toInt() - 1
                 val day = match.groupValues[3].toInt()
-                if (year in 1990..2030 && month in 0..11 && day in 1..31) {
+                val maxYear = Calendar.getInstance().get(Calendar.YEAR)
+                if (year in 1980..maxYear && month in 0..11 && day in 1..31) {
                     val cal = Calendar.getInstance()
                     cal.set(year, month, day, 12, 0, 0)
                     cal.set(Calendar.MILLISECOND, 0)

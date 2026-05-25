@@ -2,6 +2,7 @@ package com.photocurator
 
 import android.Manifest
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -20,10 +21,18 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.photocurator.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -57,6 +66,12 @@ class MainActivity : AppCompatActivity() {
             showToast(if (hasManageMediaPermission()) "One-Click Delete enabled" else "One-Click Delete disabled")
         }
 
+    private val importLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri ?: return@registerForActivityResult
+            importHiddenMonths(uri)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -65,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         setupRecyclerView()
         setupSelectionBar()
         setupRestoreSpinners()
-        setupPdfCheckbox()
+        setupFilterChips()
         setupScrollToTop()
         observeViewModel()
         requestPermissionsIfNeeded()
@@ -86,13 +101,31 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun setupPdfCheckbox() {
-        binding.cbIncludePdf.isChecked = viewModel.includePdf.value ?: false
-        
-        binding.cbIncludePdf.setOnCheckedChangeListener { _, isChecked ->
+    private fun setupFilterChips() {
+        binding.chipPhoto.isChecked = viewModel.includePhoto.value ?: true
+        binding.chipVideo.isChecked = viewModel.includeVideo.value ?: true
+        binding.chipPdf.isChecked = viewModel.includePdf.value ?: true
+
+        binding.chipPhoto.setOnCheckedChangeListener { _, isChecked ->
+            if (!isChecked && !binding.chipVideo.isChecked && !binding.chipPdf.isChecked) {
+                binding.chipPhoto.isChecked = true
+                return@setOnCheckedChangeListener
+            }
+            viewModel.setIncludePhoto(isChecked)
+        }
+        binding.chipVideo.setOnCheckedChangeListener { _, isChecked ->
+            if (!isChecked && !binding.chipPhoto.isChecked && !binding.chipPdf.isChecked) {
+                binding.chipVideo.isChecked = true
+                return@setOnCheckedChangeListener
+            }
+            viewModel.setIncludeVideo(isChecked)
+        }
+        binding.chipPdf.setOnCheckedChangeListener { _, isChecked ->
+            if (!isChecked && !binding.chipPhoto.isChecked && !binding.chipVideo.isChecked) {
+                binding.chipPdf.isChecked = true
+                return@setOnCheckedChangeListener
+            }
             viewModel.setIncludePdf(isChecked)
-            binding.tvTotalPdfs.isVisible = isChecked
-            
             if (isChecked && !hasAllFilesPermission()) {
                 requestAllFilesPermission()
             }
@@ -118,14 +151,30 @@ class MainActivity : AppCompatActivity() {
         val spanCount = 4
         adapter = GalleryAdapter(
             onMediaClick = { item ->
-                val intent = Intent(this, MediaViewerActivity::class.java).apply {
-                    putExtra(MediaViewerActivity.EXTRA_START_ID, item.id)
+                if (item.type == MediaType.PDF) {
+                    val uri = Uri.parse(item.uri)
+                    val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "application/pdf")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    try {
+                        startActivity(Intent.createChooser(openIntent, "Open PDF with"))
+                    } catch (e: Exception) {
+                        showToast("No PDF viewer found")
+                    }
+                } else {
+                    val intent = Intent(this, MediaViewerActivity::class.java).apply {
+                        putExtra(MediaViewerActivity.EXTRA_START_ID, item.id)
+                    }
+                    startActivity(intent)
                 }
-                startActivity(intent)
             },
-            onMonthHide = { group -> 
+            onMonthHide = { group ->
                 viewModel.markMonthDone(group.year, group.month)
-                showToast("${group.label} hidden")
+                com.google.android.material.snackbar.Snackbar
+                    .make(binding.root, "${group.label} hidden from this app", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                    .setAction("Undo") { viewModel.restoreMonth(group.year, group.month) }
+                    .show()
             },
             onSelectionChanged = { count -> updateSelectionBar(count) }
         )
@@ -171,17 +220,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupRestoreSpinners() {
         binding.autoCompleteYear.setOnItemClickListener { parent, _, position, _ ->
-            val selectedYear = parent.getItemAtPosition(position) as String
-            updateMonthsDropdown(selectedYear)
+            // Item is "2023 (450)" — extract just the year
+            val selectedItem = parent.getItemAtPosition(position) as String
+            val year = selectedItem.substringBefore(" ").trim()
+            updateMonthsDropdown(year)
             binding.autoCompleteMonth.setText("", false)
             binding.autoCompleteMonth.showDropDown()
         }
 
         binding.autoCompleteMonth.setOnItemClickListener { parent, _, position, _ ->
             val selectedMonthLabel = parent.getItemAtPosition(position) as String
-            val yearStr = binding.autoCompleteYear.text.toString()
+            // Year field may contain "2023 (450)" — extract just the number
+            val yearStr = binding.autoCompleteYear.text.toString().substringBefore(" ").trim()
             val year = yearStr.toIntOrNull() ?: return@setOnItemClickListener
-            
+
             val groups = viewModel.doneMonthsAvailable.value ?: emptyList()
             val group = groups.find { it.year == year && it.label.startsWith(selectedMonthLabel) }
             group?.let {
@@ -215,9 +267,27 @@ class MainActivity : AppCompatActivity() {
             binding.progressBar.isVisible = loading
         }
         
-        viewModel.sortAscending.observe(this) { asc ->
+        viewModel.sortMode.observe(this) { mode ->
             invalidateOptionsMenu()
-            supportActionBar?.subtitle = if (asc) "Oldest first" else "Newest first"
+            supportActionBar?.subtitle = when (mode) {
+                SortMode.DATE_NEWEST       -> "Newest first"
+                SortMode.DATE_OLDEST       -> "Oldest first"
+                SortMode.SIZE_ABSOLUTE     -> "Largest first (overall)"
+                SortMode.SIZE_WITHIN_MONTH -> "Largest first (per month)"
+                SortMode.COUNT_PER_MONTH   -> "Most items first"
+            }
+        }
+
+        viewModel.storageSavedEvent.observe(this) { bytes ->
+            val text = when {
+                bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
+                bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
+                bytes >= 1_024L         -> "%.1f KB".format(bytes / 1_024.0)
+                else                    -> "$bytes B"
+            }
+            com.google.android.material.snackbar.Snackbar
+                .make(binding.root, "Freed $text", com.google.android.material.snackbar.Snackbar.LENGTH_SHORT)
+                .show()
         }
         
         viewModel.deletePermissionRequest.observe(this) { intentSender ->
@@ -231,10 +301,22 @@ class MainActivity : AppCompatActivity() {
                 binding.restoreLayout.isVisible = false
             } else {
                 binding.restoreLayout.isVisible = true
-                val years = groups.map { it.year.toString() }.distinct().sortedDescending().toTypedArray()
-                binding.autoCompleteYear.setSimpleItems(years)
-                
-                val currentYear = binding.autoCompleteYear.text.toString()
+
+                // Total hidden count
+                val totalHidden = groups.sumOf { it.items.size }
+                binding.tvHiddenTotal.text = "$totalHidden items hidden"
+
+                // Year items with per-year counts and sizes: "2023 (450 / 10 MB)"
+                val yearGroups = groups.groupBy { it.year }
+                val yearCountMap = yearGroups.mapValues { (_, months) -> months.sumOf { it.items.size } }
+                val yearSizeMap  = yearGroups.mapValues { (_, months) -> months.sumOf { g -> g.items.sumOf { it.size } } }
+                val yearItems = groups.map { it.year }.distinct().sortedDescending()
+                    .map { y -> "$y (${yearCountMap[y] ?: 0} / ${fmtBytes(yearSizeMap[y] ?: 0L)})" }
+                    .toTypedArray()
+                binding.autoCompleteYear.setSimpleItems(yearItems)
+
+                // Re-populate month dropdown if a year is already selected
+                val currentYear = binding.autoCompleteYear.text.toString().substringBefore(" ").trim()
                 if (currentYear.isNotEmpty()) {
                     updateMonthsDropdown(currentYear)
                 } else {
@@ -243,15 +325,33 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        viewModel.totalPhotos.observe(this) { count ->
-            binding.tvTotalPhotos.text = "Photos: $count"
+        viewModel.totalPhotos.observe(this) { binding.tvTotalPhotos.text = "Photos: $it" }
+        viewModel.totalVideos.observe(this) { binding.tvTotalVideos.text = "Videos: $it" }
+        viewModel.totalPdfs.observe(this)   {
+            binding.tvTotalPdfs.text = "PDFs: $it"
+            binding.tvTotalPdfs.isVisible = it > 0
         }
-        viewModel.totalVideos.observe(this) { count ->
-            binding.tvTotalVideos.text = "Videos: $count"
+
+        viewModel.mediaStats.observe(this) { /* stored for popup; nothing to update in stats bar */ }
+
+        binding.btnStatsInfo.setOnClickListener { showStatsDialog() }
+
+        viewModel.scrollToTopEvent.observe(this) {
+            binding.recyclerView.scrollToPosition(0)
+            binding.appBarLayout.setExpanded(true, false)
         }
-        viewModel.totalPdfs.observe(this) { count ->
-            binding.tvTotalPdfs.text = "PDFs: $count"
-            binding.tvTotalPdfs.isVisible = viewModel.includePdf.value ?: false
+
+        viewModel.scrollToMonthKey.observe(this) { monthKey ->
+            if (monthKey == null) return@observe
+            val pos = adapter.currentList.indexOfFirst {
+                it is GalleryItem.Header && it.monthKey == monthKey
+            }
+            if (pos >= 0) {
+                (binding.recyclerView.layoutManager as? LinearLayoutManager)
+                    ?.scrollToPositionWithOffset(pos, 0)
+                binding.appBarLayout.setExpanded(true, false)
+            }
+            viewModel.clearScrollToMonth()
         }
     }
 
@@ -261,18 +361,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        val asc = viewModel.sortAscending.value ?: true
         val inSelection = adapter.selectionMode
-        menu.findItem(R.id.action_sort)?.apply {
-            title = if (asc) "Newest first" else "Oldest first"
-            isVisible = !inSelection
+        menu.findItem(R.id.action_sort)?.isVisible = !inSelection
+        // With checkableBehavior="single", only set the target item to true —
+        // the group automatically unchecks all siblings. Setting others to false
+        // explicitly triggers unexpected exclusive-group side-effects.
+        val mode = viewModel.sortMode.value ?: SortMode.DATE_OLDEST
+        val sortSub = menu.findItem(R.id.action_sort)?.subMenu
+        if (sortSub != null) {
+            val targetId = when (mode) {
+                SortMode.DATE_NEWEST       -> R.id.sort_newest
+                SortMode.DATE_OLDEST       -> R.id.sort_oldest
+                SortMode.SIZE_ABSOLUTE     -> R.id.sort_size_absolute
+                SortMode.SIZE_WITHIN_MONTH -> R.id.sort_size_month
+                SortMode.COUNT_PER_MONTH   -> R.id.sort_count_month
+            }
+            sortSub.findItem(targetId)?.isChecked = true
         }
         menu.findItem(R.id.action_refresh)?.isVisible = !inSelection
         
         val oneClickItem = menu.findItem(R.id.action_one_click_delete)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             oneClickItem.isVisible = !inSelection
-            oneClickItem.title = if (hasManageMediaPermission()) "One-Click Delete: ON" else "Enable One-Click Delete"
+            oneClickItem.isChecked = hasManageMediaPermission()
         } else {
             oneClickItem.isVisible = false
         }
@@ -280,9 +391,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem) = when (item.itemId) {
-        R.id.action_sort -> { viewModel.toggleSort(); true }
+        R.id.sort_newest        -> { viewModel.setSortMode(SortMode.DATE_NEWEST);       true }
+        R.id.sort_oldest        -> { viewModel.setSortMode(SortMode.DATE_OLDEST);       true }
+        R.id.sort_size_absolute -> { viewModel.setSortMode(SortMode.SIZE_ABSOLUTE);     true }
+        R.id.sort_size_month    -> { viewModel.setSortMode(SortMode.SIZE_WITHIN_MONTH); true }
+        R.id.sort_count_month   -> { viewModel.setSortMode(SortMode.COUNT_PER_MONTH);   true }
         R.id.action_refresh -> { viewModel.loadMedia(forceRefresh = true); true }
         R.id.action_one_click_delete -> { requestManageMediaPermission(); true }
+        R.id.action_export_hidden -> { exportHiddenMonths(); true }
+        R.id.action_import_hidden -> {
+            importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
+            true
+        }
         else -> super.onOptionsItemSelected(item)
     }
 
@@ -295,7 +415,11 @@ class MainActivity : AppCompatActivity() {
     private fun requestManageMediaPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (hasManageMediaPermission()) {
-                showToast("One-Click Delete is already enabled")
+                // Can't revoke programmatically — send user to App Settings to do it there
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
             } else {
                 val intent = Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA).apply {
                     data = Uri.parse("package:$packageName")
@@ -363,6 +487,128 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
                 allFilesAccessLauncher.launch(intent)
+            }
+        }
+    }
+
+    private fun fmtBytes(b: Long): String = when {
+        b >= 1_073_741_824L -> "%.1f GB".format(b / 1_073_741_824.0)
+        b >= 1_048_576L     -> "%.1f MB".format(b / 1_048_576.0)
+        b >= 1_024L         -> "%.1f KB".format(b / 1_024.0)
+        else                -> "$b B"
+    }
+
+    private fun showStatsDialog() {
+        val s = viewModel.mediaStats.value
+        if (s == null) { showToast("Stats not loaded yet"); return }
+
+        fun row(label: String, vis: Int, hid: Int, tot: Int) =
+            "%-8s %5d + %5d = %5d".format(label, vis, hid, tot)
+        fun rowB(label: String, vb: Long, hb: Long) =
+            "%-8s %s + %s = %s".format(label, fmtBytes(vb), fmtBytes(hb), fmtBytes(vb + hb))
+
+        val vAll = s.visiblePhotos + s.visibleVideos + s.visiblePdfs
+        val hAll = s.hiddenPhotos  + s.hiddenVideos  + s.hiddenPdfs
+        val tAll = s.totalPhotos   + s.totalVideos   + s.totalPdfs
+        val vbAll = s.visiblePhotoBytes + s.visibleVideoBytes + s.visiblePdfBytes
+        val hbAll = s.hiddenPhotoBytes  + s.hiddenVideoBytes  + s.hiddenPdfBytes
+
+        val msg = buildString {
+            appendLine("COUNTS  (visible + hidden = total)")
+            appendLine(row("Photos",  s.visiblePhotos, s.hiddenPhotos, s.totalPhotos))
+            appendLine(row("Videos",  s.visibleVideos, s.hiddenVideos, s.totalVideos))
+            appendLine(row("PDFs",    s.visiblePdfs,   s.hiddenPdfs,   s.totalPdfs))
+            appendLine(row("All",     vAll, hAll, tAll))
+            appendLine()
+            appendLine("SIZES   (visible + hidden = total)")
+            appendLine(rowB("Photos",  s.visiblePhotoBytes, s.hiddenPhotoBytes))
+            appendLine(rowB("Videos",  s.visibleVideoBytes, s.hiddenVideoBytes))
+            appendLine(rowB("PDFs",    s.visiblePdfBytes,   s.hiddenPdfBytes))
+            appendLine(rowB("All",     vbAll, hbAll))
+            appendLine()
+            append(s.integrityDetail)
+        }
+
+        val tv = android.widget.TextView(this).apply {
+            text = msg
+            typeface = android.graphics.Typeface.MONOSPACE
+            textSize = 12f
+            setPadding(48, 32, 48, 16)
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Media Stats")
+            .setView(android.widget.ScrollView(this).apply { addView(tv) })
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    // ── Export / Import ───────────────────────────────────────────────────────
+
+    private fun exportHiddenMonths() {
+        val months = viewModel.prefs.getDoneMonths()
+        if (months.isEmpty()) {
+            showToast("No hidden months to export")
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val stamp    = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.US).format(Date())
+                val filename = "mediacurator_hidden_$stamp.json"
+                val json     = buildExportJson(months)
+
+                withContext(Dispatchers.IO) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val values = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, filename)
+                            put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                        }
+                        val uri = contentResolver.insert(
+                            MediaStore.Downloads.getContentUri("external"), values
+                        ) ?: throw Exception("Could not create file in Downloads")
+                        contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                        dir.mkdirs()
+                        File(dir, filename).writeText(json, Charsets.UTF_8)
+                    }
+                }
+                showToast("Exported ${months.size} hidden months → Downloads/$filename")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Export failed", e)
+                showToast("Export failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun buildExportJson(months: Set<String>): String {
+        val ts = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
+        val arr = months.sorted().joinToString(",\n    ") { "\"$it\"" }
+        return "{\n  \"version\": 1,\n  \"exportedAt\": \"$ts\",\n  \"hiddenMonths\": [\n    $arr\n  ]\n}"
+    }
+
+    private fun importHiddenMonths(uri: Uri) {
+        lifecycleScope.launch {
+            try {
+                val json = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                } ?: run { showToast("Could not read file"); return@launch }
+
+                val obj      = org.json.JSONObject(json)
+                val arr      = obj.getJSONArray("hiddenMonths")
+                val incoming = (0 until arr.length()).map { arr.getString(it) }.toSet()
+
+                val existing = viewModel.prefs.getDoneMonths()
+                val newCount = (incoming - existing).size
+                viewModel.prefs.setDoneMonths(existing + incoming)
+                viewModel.loadMedia(forceRefresh = false)
+
+                showToast("Import done — $newCount new months added (${existing.size + newCount} total hidden)")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Import failed", e)
+                showToast("Import failed: ${e.message}")
             }
         }
     }

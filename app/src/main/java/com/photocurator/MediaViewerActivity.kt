@@ -207,36 +207,64 @@ class MediaViewerActivity : AppCompatActivity() {
 
         inner class ViewHolder(val binding: ItemViewerMediaBinding) : RecyclerView.ViewHolder(binding.root) {
             fun bind(item: MediaItem) {
-                if (item.type == MediaType.IMAGE) {
-                    binding.photoView.isVisible = true
-                    binding.videoContainer.isVisible = false
-                    Glide.with(binding.photoView).load(item.uri).into(binding.photoView)
-                    
-                    binding.photoView.setOnPhotoTapListener { _, _, _ -> onShortPress() }
-                    binding.photoView.setOnOutsidePhotoTapListener { onShortPress() }
-                } else {
-                    binding.photoView.isVisible = false
-                    binding.videoContainer.isVisible = true
-                    binding.videoView.setVideoURI(Uri.parse(item.uri))
-                    binding.videoView.setOnPreparedListener { mp ->
-                        mp.start()
-                        binding.btnPlayPause.isVisible = false
+                // Reset state from previous bind
+                binding.videoView.stopPlayback()
+                binding.photoView.setOnPhotoTapListener(null)
+                binding.photoView.setOnOutsidePhotoTapListener(null)
+
+                when (item.type) {
+                    MediaType.IMAGE -> {
+                        binding.photoView.isVisible = true
+                        binding.videoContainer.isVisible = false
+                        Glide.with(binding.photoView).load(item.uri).into(binding.photoView)
+                        binding.photoView.setOnPhotoTapListener { _, _, _ -> onShortPress() }
+                        binding.photoView.setOnOutsidePhotoTapListener { onShortPress() }
                     }
-                    
-                    binding.videoContainer.setOnClickListener { onShortPress() }
-                    
-                    binding.btnPlayPause.setOnClickListener {
-                        binding.videoView.start()
+                    MediaType.VIDEO -> {
+                        binding.photoView.isVisible = false
+                        binding.videoContainer.isVisible = true
                         binding.btnPlayPause.isVisible = false
-                    }
-                    
-                    binding.videoView.setOnClickListener {
-                        if (binding.videoView.isPlaying) {
-                            binding.videoView.pause()
+                        binding.videoView.setVideoURI(Uri.parse(item.uri))
+                        binding.videoView.setOnPreparedListener { mp ->
+                            mp.start()
+                            binding.btnPlayPause.isVisible = false
+                        }
+                        binding.videoView.setOnErrorListener { _, _, _ ->
                             binding.btnPlayPause.isVisible = true
-                        } else {
+                            true
+                        }
+                        binding.videoContainer.setOnClickListener { onShortPress() }
+                        binding.btnPlayPause.setOnClickListener {
                             binding.videoView.start()
                             binding.btnPlayPause.isVisible = false
+                        }
+                        binding.videoView.setOnClickListener {
+                            if (binding.videoView.isPlaying) {
+                                binding.videoView.pause()
+                                binding.btnPlayPause.isVisible = true
+                            } else {
+                                binding.videoView.start()
+                                binding.btnPlayPause.isVisible = false
+                            }
+                        }
+                    }
+                    MediaType.PDF -> {
+                        // PDFs open externally from the gallery; if reached here via swipe, show placeholder
+                        binding.photoView.isVisible = false
+                        binding.videoContainer.isVisible = true
+                        binding.btnPlayPause.isVisible = false
+                        binding.tvError.isVisible = true
+                        binding.tvError.text = "Tap to open PDF"
+                        binding.videoContainer.setOnClickListener {
+                            val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(Uri.parse(item.uri), "application/pdf")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            try {
+                                binding.root.context.startActivity(
+                                    Intent.createChooser(openIntent, "Open PDF with")
+                                )
+                            } catch (e: Exception) { /* no PDF viewer installed */ }
                         }
                     }
                 }

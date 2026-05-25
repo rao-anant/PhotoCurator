@@ -1,12 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:id="@+id/action_one_click_delete"
-        android:title="Enable One-Click Delete"
-        app:showAsAction="never" />
     <item android:id="@+id/action_sort" android:title="Sort"
-        app:showAsAction="ifRoom|withText" />
+        app:showAsAction="never">
+        <menu>
+            <group android:checkableBehavior="single">
+                <item android:id="@+id/sort_newest"        android:title="Newest first" />
+                <item android:id="@+id/sort_oldest"        android:title="Oldest first" />
+                <item android:id="@+id/sort_size_absolute" android:title="Largest first (overall)" />
+                <item android:id="@+id/sort_size_month"    android:title="Largest first (per month)" />
+                <item android:id="@+id/sort_count_month"   android:title="Most items first" />
+            </group>
+        </menu>
+    </item>
+    <item android:id="@+id/action_backup" android:title="Export / Import"
+        app:showAsAction="never">
+        <menu>
+            <item android:id="@+id/action_export_hidden" android:title="Export hidden months" />
+            <item android:id="@+id/action_import_hidden" android:title="Import hidden months" />
+        </menu>
+    </item>
     <item android:id="@+id/action_refresh" android:title="Refresh"
         android:icon="@android:drawable/ic_menu_rotate"
         app:showAsAction="ifRoom" />
+    <item android:id="@+id/action_one_click_delete"
+        android:title="One-Click Delete"
+        android:checkable="true"
+        app:showAsAction="never" />
 </menu>

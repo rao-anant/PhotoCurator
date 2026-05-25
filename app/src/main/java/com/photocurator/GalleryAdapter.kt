@@ -1,6 +1,9 @@
 package com.photocurator
 
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -35,6 +38,7 @@ class GalleryAdapter(
     private val selectedIds = mutableSetOf<Long>()
     private val adapterScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var diffJob: Job? = null
+    private val pdfThumbnailCache = mutableMapOf<Long, Bitmap?>()
 
     fun submitList(newList: List<GalleryItem>) {
         val oldList = currentList
@@ -171,21 +175,63 @@ class GalleryAdapter(
         private val checkmark: ImageView = itemView.findViewById(R.id.ivCheckmark)
         private val typeIcon: ImageView = itemView.findViewById(R.id.ivTypeIcon)
         private val bottomGradient: View = itemView.findViewById(R.id.bottomGradient)
+        private var pdfJob: Job? = null
 
         fun bind(media: GalleryItem.Media) {
+            pdfJob?.cancel()
+            pdfJob = null
+
             val item = media.mediaItem
             val isFeatured = (media.indexInMonth % 10) == 0
             (imageView as? SquareImageView)?.ratio = if (isFeatured) 1.2f else 1.0f
 
             if (item.type == MediaType.PDF) {
                 Glide.with(itemView.context).clear(imageView)
-                // Replaced 'ic_menu_description' with 'ic_menu_edit' for better compatibility
-                imageView.setImageResource(android.R.drawable.ic_menu_edit)
-                imageView.setBackgroundColor(Color.parseColor("#EEEEEE"))
+                imageView.setImageResource(R.drawable.ic_pdf)
+                imageView.setBackgroundColor(Color.parseColor("#F5F5F5"))
                 imageView.scaleType = ImageView.ScaleType.CENTER_INSIDE
-                typeIcon.visibility = View.VISIBLE
-                typeIcon.setImageResource(android.R.drawable.ic_menu_edit)
+                typeIcon.visibility = View.GONE
                 bottomGradient.visibility = View.GONE
+                imageView.tag = item.id
+
+                val cached = pdfThumbnailCache[item.id]
+                when {
+                    cached != null -> {
+                        imageView.setImageBitmap(cached)
+                        imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+                    }
+                    !pdfThumbnailCache.containsKey(item.id) -> {
+                        val appContext = itemView.context.applicationContext
+                        pdfJob = adapterScope.launch {
+                            val bitmap = withContext(Dispatchers.IO) {
+                                try {
+                                    val uri = Uri.parse(item.uri)
+                                    appContext.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                        PdfRenderer(pfd).use { renderer ->
+                                            renderer.openPage(0).use { page ->
+                                                val targetSize = 400
+                                                val scale = targetSize.toFloat() / maxOf(page.width, page.height)
+                                                val w = (page.width * scale).toInt().coerceAtLeast(1)
+                                                val h = (page.height * scale).toInt().coerceAtLeast(1)
+                                                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                                                bmp.eraseColor(android.graphics.Color.WHITE)
+                                                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                                bmp
+                                            }
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+                            pdfThumbnailCache[item.id] = bitmap
+                            if (imageView.tag == item.id && bitmap != null) {
+                                imageView.setImageBitmap(bitmap)
+                                imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+                            }
+                        }
+                    }
+                }
             } else {
                 imageView.scaleType = ImageView.ScaleType.CENTER_CROP
                 Glide.with(itemView.context)
