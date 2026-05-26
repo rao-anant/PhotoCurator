@@ -37,6 +37,14 @@ class GalleryAdapter(
             b >= 1_024L         -> "%.1f KB".format(b / 1_024.0)
             else                -> "$b B"
         }
+
+        fun formatDuration(ms: Long): String {
+            val totalSec = ms / 1000
+            val h = totalSec / 3600
+            val m = (totalSec % 3600) / 60
+            val s = totalSec % 60
+            return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+        }
     }
 
     var currentList: List<GalleryItem> = emptyList()
@@ -205,6 +213,7 @@ class GalleryAdapter(
         private val checkmark: ImageView = itemView.findViewById(R.id.ivCheckmark)
         private val typeIcon: ImageView = itemView.findViewById(R.id.ivTypeIcon)
         private val bottomGradient: View = itemView.findViewById(R.id.bottomGradient)
+        private val infoLabel: TextView = itemView.findViewById(R.id.tvDuration)
         private var pdfJob: Job? = null
 
         fun bind(media: GalleryItem.Media) {
@@ -221,7 +230,6 @@ class GalleryAdapter(
                 imageView.setBackgroundColor(Color.parseColor("#F5F5F5"))
                 imageView.scaleType = ImageView.ScaleType.CENTER_INSIDE
                 typeIcon.visibility = View.GONE
-                bottomGradient.visibility = View.GONE
                 imageView.tag = item.id
 
                 val cached = pdfThumbnailCache[item.id]
@@ -277,11 +285,18 @@ class GalleryAdapter(
                 typeIcon.visibility = if (item.type != MediaType.IMAGE) View.VISIBLE else View.GONE
                 if (item.type == MediaType.VIDEO) {
                     typeIcon.setImageResource(android.R.drawable.ic_media_play)
-                    bottomGradient.visibility = View.VISIBLE
-                } else {
-                    bottomGradient.visibility = View.GONE
                 }
             }
+
+            // Size (and duration for videos) shown on every item.
+            val sizeStr = fmtBytes(item.size)
+            infoLabel.text = if (item.type == MediaType.VIDEO && item.duration > 0) {
+                "${formatDuration(item.duration)} · $sizeStr"
+            } else {
+                sizeStr
+            }
+            infoLabel.visibility = View.VISIBLE
+            bottomGradient.visibility = View.VISIBLE
 
             val selected = isSelected(item)
             overlay.visibility = if (selected) View.VISIBLE else View.GONE

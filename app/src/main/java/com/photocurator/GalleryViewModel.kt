@@ -4,8 +4,11 @@ import android.app.Application
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.IntentSender
+import android.database.ContentObserver
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -98,6 +101,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingItemsToDelete: List<MediaItem>? = null
     private var pendingBytesToFree: Long = 0L
     private var loadJob: Job? = null
+    private var mediaObserver: ContentObserver? = null
 
     private var cachedRawMedia: List<MediaItem>? = null
     private var structuralVersion = 0
@@ -125,6 +129,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         // Silently restore hidden-month state from the auto-backup if prefs are empty
         // (covers fresh install, app-data clear, reinstall after uninstall).
         checkAndAutoRestore()
+        registerMediaObserver()
     }
 
     fun setIncludePhoto(include: Boolean) {
@@ -450,6 +455,55 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         pendingScrollToMonthKey = key
         structuralVersion++
         loadMedia(forceRefresh = false)
+    }
+
+    // ── MediaStore observer ───────────────────────────────────────────────────
+
+    /**
+     * Watches MediaStore for new images, videos, and downloads.  When any change
+     * arrives (e.g. WhatsApp saves a received video) we schedule a debounced
+     * forceRefresh so the item appears automatically without the user having to
+     * tap the refresh button.
+     *
+     * 3-second debounce: a burst of incoming files (e.g. bulk WhatsApp gallery
+     * download) coalesces into a single reload rather than one per file.
+     *
+     * Skipped while the app's own deletion is in flight — deletedFingerprintsInFlight
+     * being non-empty means we caused the MediaStore change ourselves, and
+     * updateUiAfterDeletion already schedules its own progressive refreshes.
+     */
+    private fun registerMediaObserver() {
+        val handler = Handler(Looper.getMainLooper())
+        val refresh = Runnable { loadMedia(forceRefresh = true) }
+
+        mediaObserver = object : ContentObserver(handler) {
+            override fun onChange(selfChange: Boolean) {
+                // Skip if we triggered this change via our own deletion.
+                if (deletedFingerprintsInFlight.isNotEmpty()) return
+                handler.removeCallbacks(refresh)
+                handler.postDelayed(refresh, 3_000L)
+            }
+        }
+
+        val resolver = getApplication<Application>().contentResolver
+        resolver.registerContentObserver(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, mediaObserver!!
+        )
+        resolver.registerContentObserver(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaObserver!!
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            resolver.registerContentObserver(
+                MediaStore.Downloads.getContentUri("external"), true, mediaObserver!!
+            )
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        mediaObserver?.let {
+            getApplication<Application>().contentResolver.unregisterContentObserver(it)
+        }
     }
 
     // ── Auto-backup ───────────────────────────────────────────────────────────

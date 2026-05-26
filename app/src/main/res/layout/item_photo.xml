@@ -17,7 +17,7 @@
     <View
         android:id="@+id/bottomGradient"
         android:layout_width="match_parent"
-        android:layout_height="32dp"
+        android:layout_height="36dp"
         android:layout_gravity="bottom"
         android:background="@drawable/bottom_gradient"
         android:visibility="gone" />
