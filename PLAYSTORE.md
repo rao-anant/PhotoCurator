@@ -8,7 +8,7 @@
 | Keystore file | `mediacurator.keystore` (gitignored — keep a backup!) |
 | Keystore alias | `mediacurator` |
 | Passwords | In `keystore.properties` (gitignored) |
-| Privacy policy URL | `https://rao-anant.github.io/PhotoCurator/privacy-policy.html` |
+| Privacy policy URL | `https://rao-anant.github.io/MediaCurator/privacy-policy.html` |
 
 > ⚠️ The keystore file and passwords are gitignored. Back them up to an external drive or
 > cloud storage. Losing the keystore means you can never push an update to this app on Play Store.
@@ -16,7 +16,7 @@
 ---
 
 ## GitHub Pages — enable the privacy policy URL
-1. Go to https://github.com/rao-anant/PhotoCurator
+1. Go to https://github.com/rao-anant/MediaCurator
 2. Settings → Pages → Source: **Deploy from a branch**
 3. Branch: `main` · Folder: `/docs`
 4. Save → wait ~2 min → verify at the URL above
