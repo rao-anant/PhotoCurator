@@ -41,7 +41,7 @@ permission. It is the canonical use case in Google's own policy documentation.
 
 ## Store listing — Short description (≤ 80 chars)
 ```
-Turbocharge curating your photos, videos and PDFs and enjoy the time reclaimed.
+Turbocharge curating your photos, videos and PDFs, and enjoy the time reclaimed.
 ```
 
 ## Store listing — Full description
