@@ -1,4 +1,4 @@
-﻿package com.anant.mediacurator
+package com.anant.mediacurator
 
 import androidx.recyclerview.widget.GridLayoutManager
 

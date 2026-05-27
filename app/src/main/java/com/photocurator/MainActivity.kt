@@ -1,4 +1,4 @@
-﻿package com.anant.mediacurator
+package com.anant.mediacurator
 
 import android.Manifest
 import android.app.Activity
@@ -64,8 +64,15 @@ class MainActivity : AppCompatActivity() {
 
     private val allFilesAccessLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            // User returned from the "All files access" settings screen — reload so PDFs appear.
-            viewModel.loadMedia()
+            // User returned from the "All files access" settings screen.
+            // If prefs are still empty, re-run the restore check now that we have file access
+            // (the first attempt at init runs before this permission is granted).
+            // Otherwise just reload so PDFs appear.
+            if (hasAllFilesPermission() && viewModel.prefs.getDoneMonths().isEmpty()) {
+                viewModel.checkAndAutoRestore()
+            } else {
+                viewModel.loadMedia()
+            }
         }
 
     private val importLauncher =
@@ -394,6 +401,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         viewModel.mediaStats.observe(this) { /* stored for popup; nothing to update in stats bar */ }
+
+        viewModel.autoRestorePrompt.observe(this) { months ->
+            if (months == null) return@observe
+            val count = months.size
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Backup found")
+                .setMessage(
+                    "Found ‘${ GalleryViewModel.AUTO_BACKUP_FILENAME}’ in Downloads " +
+                    "with $count hidden month${if (count == 1) "" else "s"}.\n\nImport it?"
+                )
+                .setPositiveButton("Import") { _, _ -> viewModel.confirmAutoRestore(months) }
+                .setNegativeButton("Skip")   { _, _ -> viewModel.dismissAutoRestore() }
+                .setCancelable(false)
+                .show()
+        }
 
         binding.btnStatsInfo.setOnClickListener { showStatsDialog() }
 

@@ -1,4 +1,4 @@
-﻿package com.anant.mediacurator
+package com.anant.mediacurator
 
 import android.app.Application
 import android.content.ContentUris
@@ -18,6 +18,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -84,6 +85,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _totalPdfs = MutableLiveData<Int>(0)
     val totalPdfs: LiveData<Int> = _totalPdfs
+
+    // Non-null while a "backup found — import?" prompt is waiting for user response.
+    // Set to null after the user confirms or skips to prevent re-showing on rotation.
+    private val _autoRestorePrompt = MutableLiveData<Set<String>?>()
+    val autoRestorePrompt: LiveData<Set<String>?> = _autoRestorePrompt
 
     companion object {
         // Shared across Activity instances (MainActivity and ViewerActivity)
@@ -353,6 +359,14 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 flatForViewer = visibleGroups.flatMap { it.items }
             }
 
+            // Guard: if this job was cancelled (e.g. a newer loadMedia call superseded it),
+            // do NOT post stale results that would overwrite the newer job's correct output.
+            // This is the key fix for the import-first-time bug: onResume() launches job1
+            // with old prefs; the import updates prefs and launches job2 which cancels job1.
+            // Without this check, job1 (which has no suspension points to honour the
+            // cancellation early) runs to completion and overwrites job2's correct results.
+            if (!isActive) return@launch
+
             _flatMediaItems.postValue(flatForViewer)
             _galleryItems.postValue(galleryItems)
             _doneMonthsAvailable.postValue(doneGroups)
@@ -617,7 +631,15 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      * gallery immediately reflects the restored state (the init-block call to loadMedia
      * from requestPermissionsIfNeeded fires before this async restore completes).
      */
-    private fun checkAndAutoRestore() {
+    /**
+     * Look for the auto-backup file in Downloads.
+     * If found and prefs are still empty, post a prompt LiveData so the Activity
+     * can show a confirmation dialog before importing.
+     *
+     * Called automatically at init and again from MainActivity after
+     * MANAGE_EXTERNAL_STORAGE is granted (the direct-file fallback needs it).
+     */
+    internal fun checkAndAutoRestore() {
         if (prefs.getDoneMonths().isNotEmpty()) return  // prefs already populated — nothing to do
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -625,7 +647,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 val resolver = app.contentResolver
 
                 val json: String? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    // Pass 1: MediaStore (own files)
+                    // Pass 1: MediaStore (own-package files)
                     val collection = MediaStore.Downloads.getContentUri("external")
                     val fromMediaStore = resolver.query(
                         collection,
@@ -640,7 +662,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                         resolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
                     }
 
-                    // Pass 2: direct path fallback (covers renamed package / cross-app files)
+                    // Pass 2: direct path fallback (needs MANAGE_EXTERNAL_STORAGE;
+                    // covers reinstall, data-clear, or a file written by a different package)
                     fromMediaStore ?: run {
                         @Suppress("DEPRECATION")
                         val file = File(
@@ -664,19 +687,27 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     val arr    = obj.getJSONArray("hiddenMonths")
                     val months = (0 until arr.length()).map { arr.getString(it) }.toSet()
                     if (months.isNotEmpty()) {
-                        prefs.setDoneMonths(months)
-                        Log.i("GalleryViewModel", "Auto-restored ${months.size} hidden months from backup")
-                        // Re-trigger load so the restored state is visible immediately.
-                        // (The initial loadMedia call races ahead of this IO coroutine.)
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            loadMedia(forceRefresh = false)
-                        }
+                        Log.i("GalleryViewModel", "Auto-restore: found ${months.size} hidden months, prompting user")
+                        // Hand off to the Activity — don't import silently.
+                        _autoRestorePrompt.postValue(months)
                     }
                 }
             } catch (e: Exception) {
-                Log.e("GalleryViewModel", "Auto-restore failed", e)
+                Log.e("GalleryViewModel", "Auto-restore check failed", e)
             }
         }
+    }
+
+    /** User tapped "Import" in the auto-restore confirmation dialog. */
+    fun confirmAutoRestore(months: Set<String>) {
+        _autoRestorePrompt.value = null
+        prefs.setDoneMonths(months)
+        loadMedia(forceRefresh = false)
+    }
+
+    /** User tapped "Skip" in the auto-restore confirmation dialog. */
+    fun dismissAutoRestore() {
+        _autoRestorePrompt.value = null
     }
 
     private fun buildBackupJson(months: Set<String>): String {

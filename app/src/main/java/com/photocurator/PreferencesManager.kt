@@ -1,4 +1,4 @@
-﻿package com.anant.mediacurator
+package com.anant.mediacurator
 
 import android.content.Context
 import android.content.SharedPreferences
