@@ -241,13 +241,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
 
-            // 5. Process into groups
+            // 5. Process into groups (always needed for stats and done-months panel)
             val (visibleGroups, _) = repo.processAndGroupMedia(displayMedia, sortMode, doneMonthKeys)
             val (allVisibleFull, doneGroups) = repo.processAndGroupMedia(filteredMedia, sortMode, doneMonthKeys)
-
-            // Publish flat list for MediaViewerActivity in the same order as the grid
-            // (processAndGroupMedia applies the sort; flatMap preserves month × item order).
-            _flatMediaItems.postValue(visibleGroups.flatMap { it.items })
 
             // 6. Build MediaStats (counts + sizes per type, integrity check)
             fun countOf(groups: List<MonthGroup>, t: MediaType) = groups.sumOf { g -> g.items.count { it.type == t } }
@@ -274,38 +270,79 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 integrityOk, integrityDetail
             ))
 
-            // 7. Build flat list for Adapter — grouped by year (tree view)
-            // Group visible months by year, preserving the sort order from processAndGroupMedia
-            val yearToMonths = LinkedHashMap<Int, MutableList<MonthGroup>>()
-            for (group in visibleGroups) {
-                yearToMonths.getOrPut(group.year) { mutableListOf() }.add(group)
-            }
+            // 7. Build gallery item list — flat for SIZE_ABSOLUTE, tree for everything else
+            val galleryItems: List<GalleryItem>
+            val flatForViewer: List<MediaItem>
 
-            val expandedYearsSnapshot  = expandedYears.toSet()
-            val expandedMonthsSnapshot = expandedMonths.toSet()
+            if (sortMode == SortMode.SIZE_ABSOLUTE) {
+                // Pure size-descending flat list: no year/month headers at all.
+                // A date badge (e.g. "Jan 2024") is embedded in each Media item so
+                // the user knows the month without needing tree structure.
+                val dateFmt  = java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.getDefault())
+                val calendar = java.util.Calendar.getInstance()
+                val flatSorted = displayMedia.sortedWith(
+                    compareByDescending<MediaItem> { it.size }.thenByDescending { it.dateTaken }
+                )
+                galleryItems = flatSorted.mapIndexed { idx, mediaItem ->
+                    calendar.timeInMillis = mediaItem.dateTaken
+                    GalleryItem.Media(mediaItem, "", idx, dateFmt.format(calendar.time), currentVersion)
+                }
+                flatForViewer = flatSorted
+            } else {
+                // Normal tree view grouped by year → month.
+                //
+                // Header counts/sizes always reflect ALL item types (allVisibleFull),
+                // not just the ones matching the current chip filter.  This keeps the
+                // header stable — "203 items · 45.2 MB" — regardless of which type
+                // chips are active, so the user can see the true contents of each month
+                // even when only Videos (or Photos, or PDFs) are displayed.
+                // The thumbnails shown when a month is expanded are still type-filtered.
+                val allMonthLookup = allVisibleFull.associateBy { it.key }
+                val allYearStats   = allVisibleFull.groupBy { it.year }.mapValues { (_, groups) ->
+                    Pair(
+                        groups.sumOf { it.items.size },
+                        groups.sumOf { g -> g.items.sumOf { it.size } }
+                    )
+                }
 
-            val items = ArrayList<GalleryItem>()
-            for ((year, months) in yearToMonths) {
-                val yearItemCount  = months.sumOf { it.items.size }
-                val yearBytes      = months.sumOf { g -> g.items.sumOf { it.size } }
-                val isYearExpanded = expandedYearsSnapshot.contains(year)
-                items.add(GalleryItem.YearHeader(year, yearItemCount, yearBytes, isYearExpanded, currentVersion))
-                if (isYearExpanded) {
-                    for (group in months) {
-                        val monthBytes      = group.items.sumOf { it.size }
-                        val isMonthExpanded = expandedMonthsSnapshot.contains(group.key)
-                        items.add(GalleryItem.Header(group.key, group.label, group.items.size, monthBytes, isMonthExpanded, currentVersion))
-                        if (isMonthExpanded) {
-                            group.items.forEachIndexed { index, mediaItem ->
-                                items.add(GalleryItem.Media(mediaItem, group.key, index, currentVersion))
+                val yearToMonths = LinkedHashMap<Int, MutableList<MonthGroup>>()
+                for (group in visibleGroups) {
+                    yearToMonths.getOrPut(group.year) { mutableListOf() }.add(group)
+                }
+
+                val expandedYearsSnapshot  = expandedYears.toSet()
+                val expandedMonthsSnapshot = expandedMonths.toSet()
+
+                val treeItems = ArrayList<GalleryItem>()
+                for ((year, months) in yearToMonths) {
+                    val (yearItemCount, yearBytes) = allYearStats[year] ?: Pair(
+                        months.sumOf { it.items.size },
+                        months.sumOf { g -> g.items.sumOf { it.size } }
+                    )
+                    val isYearExpanded = expandedYearsSnapshot.contains(year)
+                    treeItems.add(GalleryItem.YearHeader(year, yearItemCount, yearBytes, isYearExpanded, currentVersion))
+                    if (isYearExpanded) {
+                        for (group in months) {
+                            val allGroup        = allMonthLookup[group.key]
+                            val monthItemCount  = allGroup?.items?.size ?: group.items.size
+                            val monthBytes      = allGroup?.items?.sumOf { it.size } ?: group.items.sumOf { it.size }
+                            val isMonthExpanded = expandedMonthsSnapshot.contains(group.key)
+                            treeItems.add(GalleryItem.Header(group.key, group.label, monthItemCount, monthBytes, isMonthExpanded, currentVersion))
+                            if (isMonthExpanded) {
+                                group.items.forEachIndexed { index, mediaItem ->
+                                    treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
+                                }
+                                treeItems.add(GalleryItem.Footer(group.key, currentVersion))
                             }
-                            items.add(GalleryItem.Footer(group.key, currentVersion))
                         }
                     }
                 }
+                galleryItems = treeItems
+                flatForViewer = visibleGroups.flatMap { it.items }
             }
 
-            _galleryItems.postValue(items)
+            _flatMediaItems.postValue(flatForViewer)
+            _galleryItems.postValue(galleryItems)
             _doneMonthsAvailable.postValue(doneGroups)
             _isLoading.postValue(false)
 

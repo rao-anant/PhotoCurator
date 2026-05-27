@@ -69,6 +69,9 @@ sealed class GalleryItem {
         val mediaItem: MediaItem,
         val monthKey: String,
         val indexInMonth: Int,
+        // Non-null only in flat (SIZE_ABSOLUTE) mode — shown as a badge on the thumbnail
+        // so the user knows which month each item belongs to without tree headers.
+        val dateLabel: String? = null,
         override val structuralVersion: Int = 0
     ) : GalleryItem()
 

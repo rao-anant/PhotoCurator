@@ -302,6 +302,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Show the Unhide panel only when there are hidden months AND the tree view is active. */
+    private fun updateRestoreLayoutVisibility() {
+        val hasHidden  = (viewModel.doneMonthsAvailable.value?.isNotEmpty()) == true
+        val isTreeMode = viewModel.sortMode.value != SortMode.SIZE_ABSOLUTE
+        binding.restoreLayout.isVisible = hasHidden && isTreeMode
+    }
+
     private fun observeViewModel() {
         viewModel.galleryItems.observe(this) { items ->
             adapter.submitList(items)
@@ -323,6 +330,8 @@ class MainActivity : AppCompatActivity() {
                 SortMode.SIZE_WITHIN_MONTH -> "Largest first (per month)"
                 SortMode.COUNT_PER_MONTH   -> "Most items first"
             }
+            // Unhide panel is a tree-view operation — hide it in flat mode
+            updateRestoreLayoutVisibility()
         }
 
         viewModel.storageSavedEvent.observe(this) { bytes ->
@@ -347,7 +356,7 @@ class MainActivity : AppCompatActivity() {
             if (groups.isEmpty()) {
                 binding.restoreLayout.isVisible = false
             } else {
-                binding.restoreLayout.isVisible = true
+                updateRestoreLayoutVisibility()
 
                 // Total hidden count
                 val totalHidden = groups.sumOf { it.items.size }
@@ -600,6 +609,12 @@ class MainActivity : AppCompatActivity() {
     // ── Sticky header ─────────────────────────────────────────────────────────
 
     private fun updateStickyHeader(firstVisiblePos: Int = -1) {
+        // Flat mode has no tree headers — nothing to show.
+        if (viewModel.sortMode.value == SortMode.SIZE_ABSOLUTE) {
+            binding.stickyHeader.isVisible = false
+            return
+        }
+
         val lm = binding.recyclerView.layoutManager as? LinearLayoutManager ?: return
         val firstPos = if (firstVisiblePos >= 0) firstVisiblePos
                        else lm.findFirstVisibleItemPosition()

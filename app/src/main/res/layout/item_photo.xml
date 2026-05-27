@@ -17,7 +17,7 @@
     <View
         android:id="@+id/bottomGradient"
         android:layout_width="match_parent"
-        android:layout_height="36dp"
+        android:layout_height="28dp"
         android:layout_gravity="bottom"
         android:background="@drawable/bottom_gradient"
         android:visibility="gone" />
@@ -33,6 +33,25 @@
         app:tint="@android:color/white"
         android:visibility="gone" />
 
+    <!-- Date badge (top-left): shown only in flat SIZE_ABSOLUTE mode.
+         Lives at the top so it has the full cell width and never competes
+         with the size label at the bottom. -->
+    <TextView
+        android:id="@+id/tvDate"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="4dp"
+        android:paddingHorizontal="5dp"
+        android:paddingVertical="2dp"
+        android:background="#BB000000"
+        android:textColor="@android:color/white"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:singleLine="true"
+        android:visibility="gone" />
+
+    <!-- Size / duration (bottom-right): always shown -->
     <TextView
         android:id="@+id/tvDuration"
         android:layout_width="wrap_content"
@@ -44,6 +63,7 @@
         android:textColor="@android:color/white"
         android:textSize="11sp"
         android:textStyle="bold"
+        android:singleLine="true"
         android:visibility="gone" />
 
     <View

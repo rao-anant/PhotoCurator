@@ -214,6 +214,7 @@ class GalleryAdapter(
         private val typeIcon: ImageView = itemView.findViewById(R.id.ivTypeIcon)
         private val bottomGradient: View = itemView.findViewById(R.id.bottomGradient)
         private val infoLabel: TextView = itemView.findViewById(R.id.tvDuration)
+        private val dateLabel: TextView = itemView.findViewById(R.id.tvDate)
         private var pdfJob: Job? = null
 
         fun bind(media: GalleryItem.Media) {
@@ -297,6 +298,14 @@ class GalleryAdapter(
             }
             infoLabel.visibility = View.VISIBLE
             bottomGradient.visibility = View.VISIBLE
+
+            // Date badge — only in flat (SIZE_ABSOLUTE) mode
+            if (media.dateLabel != null) {
+                dateLabel.text = media.dateLabel
+                dateLabel.visibility = View.VISIBLE
+            } else {
+                dateLabel.visibility = View.GONE
+            }
 
             val selected = isSelected(item)
             overlay.visibility = if (selected) View.VISIBLE else View.GONE
