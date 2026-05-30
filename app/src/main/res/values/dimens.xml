@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Bottom padding already applied to selectionBar via XML; this is the extra inset offset -->
+    <dimen name="selection_bar_padding_v">12dp</dimen>
+    <!-- FAB bottom margin (added on top of the navigation bar inset) -->
+    <dimen name="fab_margin">16dp</dimen>
+</resources>

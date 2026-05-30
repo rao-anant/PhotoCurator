@@ -296,27 +296,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 flatForViewer = flatSorted
             } else {
                 // Normal tree view grouped by year → month.
-                //
-                // Header counts/sizes always reflect ALL item types (allVisibleFull),
-                // not just the ones matching the current chip filter.  This keeps the
-                // header stable — "203 items · 45.2 MB" — regardless of which type
-                // chips are active, so the user can see the true contents of each month
-                // even when only Videos (or Photos, or PDFs) are displayed.
-                // The thumbnails shown when a month is expanded are still type-filtered.
-                val allMonthLookup = allVisibleFull.associateBy { it.key }
-                // Per-year stats: total count, total bytes, and per-type counts — all from
-                // allVisibleFull so header numbers are stable regardless of chip filter.
-                data class YearStat(val total: Int, val bytes: Long, val photos: Int, val videos: Int, val pdfs: Int)
-                val allYearStats = allVisibleFull.groupBy { it.year }.mapValues { (_, groups) ->
-                    YearStat(
-                        total  = groups.sumOf { it.items.size },
-                        bytes  = groups.sumOf { g -> g.items.sumOf { it.size } },
-                        photos = groups.sumOf { g -> g.items.count { it.type == MediaType.IMAGE } },
-                        videos = groups.sumOf { g -> g.items.count { it.type == MediaType.VIDEO } },
-                        pdfs   = groups.sumOf { g -> g.items.count { it.type == MediaType.PDF   } }
-                    )
-                }
-
+                // Header counts/sizes reflect the chip-filtered set (visibleGroups / group.items)
+                // so they stay consistent with the thumbnails shown.  The chip labels in the
+                // toolbar already carry the total-per-type counts, so users can see the full
+                // library breakdown without the headers needing to show filtered-out types.
                 val yearToMonths = LinkedHashMap<Int, MutableList<MonthGroup>>()
                 for (group in visibleGroups) {
                     yearToMonths.getOrPut(group.year) { mutableListOf() }.add(group)
@@ -327,23 +310,20 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
                 val treeItems = ArrayList<GalleryItem>()
                 for ((year, months) in yearToMonths) {
-                    val ys = allYearStats[year]
-                    val yearItemCount = ys?.total  ?: months.sumOf { it.items.size }
-                    val yearBytes     = ys?.bytes  ?: months.sumOf { g -> g.items.sumOf { it.size } }
-                    val yearPhotos    = ys?.photos ?: 0
-                    val yearVideos    = ys?.videos ?: 0
-                    val yearPdfs      = ys?.pdfs   ?: 0
+                    val yearItemCount = months.sumOf { it.items.size }
+                    val yearBytes     = months.sumOf { g -> g.items.sumOf { it.size } }
+                    val yearPhotos    = months.sumOf { g -> g.items.count { it.type == MediaType.IMAGE } }
+                    val yearVideos    = months.sumOf { g -> g.items.count { it.type == MediaType.VIDEO } }
+                    val yearPdfs      = months.sumOf { g -> g.items.count { it.type == MediaType.PDF   } }
                     val isYearExpanded = expandedYearsSnapshot.contains(year)
                     treeItems.add(GalleryItem.YearHeader(year, yearItemCount, yearBytes, isYearExpanded, yearPhotos, yearVideos, yearPdfs, currentVersion))
                     if (isYearExpanded) {
                         for (group in months) {
-                            val allGroup        = allMonthLookup[group.key]
-                            val src             = allGroup?.items ?: group.items
-                            val monthItemCount  = src.size
-                            val monthBytes      = src.sumOf { it.size }
-                            val monthPhotos     = src.count { it.type == MediaType.IMAGE }
-                            val monthVideos     = src.count { it.type == MediaType.VIDEO }
-                            val monthPdfs       = src.count { it.type == MediaType.PDF   }
+                            val monthItemCount  = group.items.size
+                            val monthBytes      = group.items.sumOf { it.size }
+                            val monthPhotos     = group.items.count { it.type == MediaType.IMAGE }
+                            val monthVideos     = group.items.count { it.type == MediaType.VIDEO }
+                            val monthPdfs       = group.items.count { it.type == MediaType.PDF   }
                             val isMonthExpanded = expandedMonthsSnapshot.contains(group.key)
                             treeItems.add(GalleryItem.Header(group.key, group.label, monthItemCount, monthBytes, isMonthExpanded, monthPhotos, monthVideos, monthPdfs, currentVersion))
                             if (isMonthExpanded) {

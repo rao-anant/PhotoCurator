@@ -11,14 +11,14 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    compileSdk 34
+    compileSdk 35
     namespace 'com.anant.mediacurator'
 
     defaultConfig {
         applicationId "com.anant.mediacurator"
         minSdk 26
-        targetSdk 34
-        versionCode 1
+        targetSdk 35
+        versionCode 5
         versionName "1.0"
     }
 
@@ -54,6 +54,7 @@ android {
 
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 
     bundle {
@@ -65,6 +66,21 @@ android {
     applicationVariants.all { variant ->
         variant.outputs.all {
             outputFileName = "mediacurator-${variant.buildType.name}-${defaultConfig.versionName}.apk"
+        }
+    }
+}
+
+// Rename AAB outputs to match APK naming convention
+afterEvaluate {
+    android.applicationVariants.all { variant ->
+        def bundleTask = tasks.findByName("bundle${variant.name.capitalize()}")
+        if (bundleTask) {
+            bundleTask.doLast {
+                def outputDir = new File("${buildDir}/outputs/bundle/${variant.name}")
+                def oldFile = new File(outputDir, "app-${variant.name}.aab")
+                def newFile = new File(outputDir, "mediacurator-${variant.buildType.name}-${android.defaultConfig.versionName}.aab")
+                if (oldFile.exists()) oldFile.renameTo(newFile)
+            }
         }
     }
 }

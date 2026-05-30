@@ -26,13 +26,14 @@
 ## MANAGE_EXTERNAL_STORAGE declaration
 When Play Store asks "why does your app need All Files Access?", paste this:
 
-> Media Curator browses and deletes photos, videos, and PDF documents as part of a
-> media curation workflow. The "All files access" permission is used solely to locate
-> PDF files stored in the Downloads and Documents folders on the device.
-> Android's granular media permissions (READ_MEDIA_IMAGES, READ_MEDIA_VIDEO) cover only
-> photos and videos; there is no standard permission for reading PDF files across shared
-> folders on Android 13 and above. No files are uploaded, shared, or transmitted outside
-> the device. The app has no internet connection.
+> Media Curator is a media curation app: it browses and deletes photos, videos, and PDF
+> documents. All Files Access is used solely to locate PDF files stored in Downloads and
+> Documents folders on the device. Android's granular media permissions
+> (READ_MEDIA_IMAGES, READ_MEDIA_VIDEO) cover only photos and videos — no equivalent
+> permission exists for PDF or document files on Android 13 and above. No files are
+> uploaded, shared, or transmitted. The app has no internet access.
+>
+> (473 chars — Play Console limit is 500)
 
 Note: Google Files, Samsung My Files, and every mainstream file manager use this same
 permission. It is the canonical use case in Google's own policy documentation.

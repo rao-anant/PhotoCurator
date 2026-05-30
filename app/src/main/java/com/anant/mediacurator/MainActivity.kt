@@ -20,7 +20,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
+import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -86,6 +89,16 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+        // Pad the bottom bar and FAB so they clear the gesture/nav-button bar on Android 15+
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            binding.selectionBar.updatePadding(bottom = navBar.bottom + resources.getDimensionPixelSize(R.dimen.selection_bar_padding_v))
+            (binding.fabScrollToTop.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
+                it.bottomMargin = navBar.bottom + resources.getDimensionPixelSize(R.dimen.fab_margin)
+                binding.fabScrollToTop.layoutParams = it
+            }
+            insets
+        }
         setupRecyclerView()
         setupSelectionBar()
         setupRestoreSpinners()
@@ -124,6 +137,7 @@ class MainActivity : AppCompatActivity() {
         binding.chipPhoto.setOnCheckedChangeListener { _, isChecked ->
             if (!isChecked && !binding.chipVideo.isChecked && !binding.chipPdf.isChecked) {
                 binding.chipPhoto.isChecked = true
+                showToast("At least one filter must be active")
                 return@setOnCheckedChangeListener
             }
             viewModel.setIncludePhoto(isChecked)
@@ -131,6 +145,7 @@ class MainActivity : AppCompatActivity() {
         binding.chipVideo.setOnCheckedChangeListener { _, isChecked ->
             if (!isChecked && !binding.chipPhoto.isChecked && !binding.chipPdf.isChecked) {
                 binding.chipVideo.isChecked = true
+                showToast("At least one filter must be active")
                 return@setOnCheckedChangeListener
             }
             viewModel.setIncludeVideo(isChecked)
@@ -138,6 +153,7 @@ class MainActivity : AppCompatActivity() {
         binding.chipPdf.setOnCheckedChangeListener { _, isChecked ->
             if (!isChecked && !binding.chipPhoto.isChecked && !binding.chipVideo.isChecked) {
                 binding.chipPdf.isChecked = true
+                showToast("At least one filter must be active")
                 return@setOnCheckedChangeListener
             }
             viewModel.setIncludePdf(isChecked)
@@ -324,13 +340,16 @@ class MainActivity : AppCompatActivity() {
     private fun observeViewModel() {
         viewModel.galleryItems.observe(this) { items ->
             adapter.submitList(items)
-            binding.tvEmpty.isVisible = items.isEmpty()
+            val isLoading = viewModel.isLoading.value ?: false
+            binding.tvEmpty.isVisible = items.isEmpty() && !isLoading
+            if (items.isEmpty() && !isLoading) binding.tvEmpty.text = resolveEmptyMessage()
             // Re-evaluate sticky after list changes (expansion toggles don't always fire a scroll event)
             binding.recyclerView.post { updateStickyHeader() }
         }
         
         viewModel.isLoading.observe(this) { loading ->
             binding.progressBar.isVisible = loading
+            if (loading) binding.tvEmpty.isVisible = false  // never show empty state while loading
         }
         
         viewModel.sortMode.observe(this) { mode ->
@@ -367,7 +386,10 @@ class MainActivity : AppCompatActivity() {
         viewModel.doneMonthsAvailable.observe(this) { groups ->
             if (groups.isEmpty()) {
                 binding.restoreLayout.isVisible = false
+                binding.tvHiddenCount.isVisible = false
             } else {
+                binding.tvHiddenCount.text = "${groups.size} hidden"
+                binding.tvHiddenCount.isVisible = true
                 updateRestoreLayoutVisibility()
 
                 // Total hidden count
@@ -400,7 +422,12 @@ class MainActivity : AppCompatActivity() {
             binding.tvTotalPdfs.isVisible = it > 0
         }
 
-        viewModel.mediaStats.observe(this) { /* stored for popup; nothing to update in stats bar */ }
+        viewModel.mediaStats.observe(this) { stats ->
+            if (stats == null) return@observe
+            binding.chipPhoto.text = "Photos (${stats.visiblePhotos})"
+            binding.chipVideo.text = "Videos (${stats.visibleVideos})"
+            binding.chipPdf.text   = "PDFs (${stats.visiblePdfs})"
+        }
 
         viewModel.autoRestorePrompt.observe(this) { months ->
             if (months == null) return@observe
@@ -591,6 +618,33 @@ class MainActivity : AppCompatActivity() {
         b >= 1_048_576L     -> "%.1f MB".format(b / 1_048_576.0)
         b >= 1_024L         -> "%.1f KB".format(b / 1_024.0)
         else                -> "$b B"
+    }
+
+    /**
+     * Returns the most helpful explanation for why the gallery is empty:
+     *  1. A chip filter is on and is hiding items that exist → tell user to adjust chips
+     *  2. All months are marked as done → tell user to use Unhide
+     *  3. No media on device at all → generic message
+     */
+    private fun resolveEmptyMessage(): String {
+        val stats        = viewModel.mediaStats.value
+        val allChipsOn   = (viewModel.includePhoto.value ?: true) &&
+                           (viewModel.includeVideo.value ?: true) &&
+                           (viewModel.includePdf.value   ?: true)
+        val totalVisible = (stats?.visiblePhotos ?: 0) +
+                           (stats?.visibleVideos ?: 0) +
+                           (stats?.visiblePdfs   ?: 0)
+
+        if (!allChipsOn && totalVisible > 0) {
+            return "No items match the current filter.\nTap the chips above to show more types."
+        }
+
+        val hasHiddenMonths = viewModel.doneMonthsAvailable.value?.isNotEmpty() == true
+        if (hasHiddenMonths) {
+            return "All months are marked as done!\nUse the Unhide panel above to restore months."
+        }
+
+        return "No media found on this device."
     }
 
     private fun showStatsDialog() {
@@ -822,7 +876,7 @@ Hidden-month state is auto-saved to mediacurator_hidden.json in your Downloads f
         }
 
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Media Curator — Help")
+            .setTitle("Media Curator — Help  (v${BuildConfig.VERSION_NAME} / ${BuildConfig.VERSION_CODE})")
             .setView(android.widget.ScrollView(this).apply { addView(tv) })
             .setPositiveButton("Got it", null)
             .show()

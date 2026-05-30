@@ -4,6 +4,9 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import android.os.Handler
 import android.os.Looper
 import android.view.LayoutInflater
@@ -46,6 +49,21 @@ class MediaViewerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMediaViewerBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Material3 auto-applies colorControlNormal as imageTintList on ImageButtons.
+        // Null it out so our vector's hardcoded white fill renders directly.
+        binding.btnShare.imageTintList = null
+        binding.btnDelete.imageTintList = null
+
+        // Push the bottom toolbar above the system navigation bar
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            (binding.bottomToolbar.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
+                it.bottomMargin = navBars.bottom
+                binding.bottomToolbar.layoutParams = it
+            }
+            insets
+        }
 
         val startId = intent.getLongExtra(EXTRA_START_ID, -1L)
         val startPosition = intent.getIntExtra(EXTRA_START_POSITION, 0)
